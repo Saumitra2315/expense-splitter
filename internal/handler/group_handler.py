@@ -1,10 +1,10 @@
-from uuid import uuid4
+from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, Query
 
 from internal.middleware.auth import verify_token
-from internal.models.group import Group, GroupCreate
-from internal.storage.inmemory import balances, groups
+from internal.models.group import GroupCreate, MembershipChange
+from internal.service.ledger_service import LedgerService, RequestMetadata
 
 router = APIRouter(
     prefix="/groups",
@@ -12,10 +12,28 @@ router = APIRouter(
     dependencies=[Depends(verify_token)],
 )
 
+service = LedgerService()
 
-@router.post("", response_model=Group)
-def create_group(payload: GroupCreate) -> Group:
-    group = Group(id=str(uuid4()), name=payload.name, members=payload.members)
-    groups[group.id] = group
-    balances[group.id] = {member: 0.0 for member in group.members}
-    return group
+
+@router.post("", status_code=201)
+def create_group(
+    payload: GroupCreate,
+    idempotency_key: str | None = Header(None),
+) -> dict[str, Any]:
+    metadata = RequestMetadata(idempotency_key=idempotency_key)
+    return service.create_group(payload, metadata)
+
+
+@router.get("/{group_id}")
+def get_group(group_id: str) -> dict[str, Any]:
+    return service.get_group(group_id)
+
+
+@router.post("/{group_id}/members")
+def change_membership(
+    group_id: str,
+    payload: MembershipChange,
+    idempotency_key: str | None = Header(None),
+) -> dict[str, Any]:
+    metadata = RequestMetadata(idempotency_key=idempotency_key)
+    return service.change_membership(group_id, payload, metadata)
