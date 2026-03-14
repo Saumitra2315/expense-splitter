@@ -1,11 +1,20 @@
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from internal.handler.budget_handler import router as budget_router
 from internal.handler.expense_handler import router as expense_router
+from internal.handler.export_handler import router as export_router
 from internal.handler.group_handler import router as group_router
+from internal.handler.notification_handler import router as notification_router
+from internal.middleware.rate_limiter import RateLimiterMiddleware, RateLimitConfig
+from internal.middleware.request_logger import RequestLoggerMiddleware
 from internal.service.ledger_service import ServiceError
 
-app = FastAPI(title="Expense Splitter")
+app = FastAPI(
+    title="Expense Splitter",
+    description="Production-ready API for managing shared expenses across groups",
+    version="2.0.0",
+)
 
 
 @app.exception_handler(ServiceError)
@@ -21,8 +30,19 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# Register routers.
 app.include_router(group_router)
 app.include_router(expense_router)
+app.include_router(notification_router)
+app.include_router(export_router)
+app.include_router(budget_router)
+
+# Add middleware (order matters: last added = outermost).
+app.add_middleware(RequestLoggerMiddleware)
+app.add_middleware(
+    RateLimiterMiddleware,
+    config=RateLimitConfig(requests_per_minute=120, burst_size=20),
+)
 
 
 if __name__ == "__main__":

@@ -160,6 +160,110 @@ CREATE TABLE IF NOT EXISTS sync_operations (
     created_at TEXT NOT NULL,
     UNIQUE (device_id, client_operation_id)
 );
+
+CREATE TABLE IF NOT EXISTS notification_preferences (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    channel TEXT NOT NULL DEFAULT 'in_app',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    event_types_json TEXT NOT NULL DEFAULT '[]',
+    threshold_amount TEXT,
+    quiet_hours_start INTEGER,
+    quiet_hours_end INTEGER,
+    digest_frequency TEXT NOT NULL DEFAULT 'none',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (group_id, member_id),
+    FOREIGN KEY (group_id) REFERENCES groups(id)
+);
+
+CREATE TABLE IF NOT EXISTS notification_events (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    triggered_by TEXT NOT NULL,
+    payload_json TEXT,
+    amount TEXT,
+    currency_code TEXT,
+    read INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (group_id) REFERENCES groups(id)
+);
+
+CREATE TABLE IF NOT EXISTS notification_deliveries (
+    id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    delivered INTEGER NOT NULL DEFAULT 0,
+    delivered_at TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (event_id) REFERENCES notification_events(id)
+);
+
+CREATE TABLE IF NOT EXISTS budgets (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL,
+    category TEXT NOT NULL,
+    amount TEXT NOT NULL,
+    currency_code TEXT NOT NULL,
+    period TEXT NOT NULL DEFAULT 'monthly',
+    alert_thresholds_json TEXT NOT NULL DEFAULT '[50, 80, 100]',
+    rollover INTEGER NOT NULL DEFAULT 0,
+    notes TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (group_id) REFERENCES groups(id)
+);
+
+CREATE TABLE IF NOT EXISTS category_rules (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL,
+    category TEXT NOT NULL,
+    keywords_json TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (group_id) REFERENCES groups(id)
+);
+
+CREATE TABLE IF NOT EXISTS export_jobs (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL,
+    format TEXT NOT NULL DEFAULT 'csv',
+    status TEXT NOT NULL DEFAULT 'pending',
+    filters_json TEXT,
+    columns_json TEXT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    result_json TEXT,
+    FOREIGN KEY (group_id) REFERENCES groups(id)
+);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    description TEXT NOT NULL,
+    applied_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_prefs_group
+    ON notification_preferences(group_id);
+CREATE INDEX IF NOT EXISTS idx_notification_prefs_member
+    ON notification_preferences(group_id, member_id);
+CREATE INDEX IF NOT EXISTS idx_notification_events_group
+    ON notification_events(group_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_notification_deliveries_event
+    ON notification_deliveries(event_id);
+CREATE INDEX IF NOT EXISTS idx_notification_deliveries_member
+    ON notification_deliveries(member_id);
+CREATE INDEX IF NOT EXISTS idx_budgets_group
+    ON budgets(group_id, active);
+CREATE INDEX IF NOT EXISTS idx_budgets_category
+    ON budgets(group_id, category);
+CREATE INDEX IF NOT EXISTS idx_category_rules_group
+    ON category_rules(group_id, priority);
+CREATE INDEX IF NOT EXISTS idx_export_jobs_group
+    ON export_jobs(group_id, created_at);
 """
 
 
