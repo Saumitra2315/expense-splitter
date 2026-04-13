@@ -175,6 +175,62 @@ docker run --rm -p 8080:8080 \
 
 The DB path in-container defaults to `/data/settleup.db`.
 
+## Render Deployment
+
+This repo includes `render.yaml` for one-click blueprint deployment.
+
+### 1. Deploy
+
+1. Push this repo to GitHub.
+2. In Render: `New +` -> `Blueprint`.
+3. Select this repository.
+4. Render will detect `render.yaml` and provision the web service.
+
+### 2. Verify env and storage
+
+`render.yaml` already sets:
+
+- `SETTLEUP_ALLOW_DEV_TOKEN=0` (disables fallback dev token)
+- `SETTLEUP_AUTH_SECRET` (auto-generated)
+- `SETTLEUP_DB_PATH=/var/data/settleup.db` with a persistent disk mount
+
+### 3. Generate a token for demo calls
+
+Locally generate a signed token with the same `SETTLEUP_AUTH_SECRET` value from Render:
+
+```bash
+python scripts/generate_auth_token.py --sub demo-user --role admin --secret "<RENDER_SECRET>"
+```
+
+### 4. Smoke test the live service
+
+```bash
+export API="https://<your-render-service>.onrender.com"
+export TOKEN="<signed-token>"
+
+curl "$API/health"
+
+curl -X POST "$API/groups" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Render Demo Group",
+    "base_currency": "USD",
+    "members": [
+      {"member_id": "alice", "display_name": "Alice"},
+      {"member_id": "bob", "display_name": "Bob"},
+      {"member_id": "cara", "display_name": "Cara"}
+    ]
+  }'
+```
+
+### Effective demo usage
+
+- Use `/docs` as your live API demo UI.
+- Keep one reusable signed admin token during interview/demo sessions.
+- Start with the flow: create group -> add expense -> settlement plan.
+- Use `/groups/{id}/audit` to show traceability and event history.
+
 ## Notes on Scope
 
 - This repository is backend-only by design.
@@ -184,7 +240,7 @@ The DB path in-container defaults to `/data/settleup.db`.
 ## Deployment Status
 
 - Local/Docker/CI flows are set up.
-- Hosted deployment (Render/Railway) is the next step.
+- Render blueprint deployment is configured in this repo.
 
 ## Resume-Friendly Description
 

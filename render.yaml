@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: settleup-api
+    runtime: docker
+    healthCheckPath: /health
+    envVars:
+      - key: SETTLEUP_ALLOW_DEV_TOKEN
+        value: "0"
+      - key: SETTLEUP_AUTH_SECRET
+        generateValue: true
+      - key: SETTLEUP_DB_PATH
+        value: /var/data/settleup.db
+    disk:
+      name: settleup-data
+      mountPath: /var/data
+      sizeGB: 1
