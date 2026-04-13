@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -14,6 +13,16 @@ from internal.models.group import GroupCreate, MembershipChange
 from internal.models.recurring import MaterializeRecurringRequest, RecurringExpenseCreate
 from internal.models.settlement import SettlementCreate
 from internal.models.sync import SyncRequest
+from internal.service.ledger_common import (
+    advance_time,
+    coerce_time,
+    decimal_text,
+    iso,
+    json_dumps,
+    now_utc,
+    parse_time,
+    request_hash,
+)
 from internal.service.split_service import build_transfer_plan, compute_allocations, quantize_money
 from internal.storage.sqlite import init_db, read_connection, resolve_db_path, write_connection
 
@@ -54,13 +63,13 @@ class LedgerService:
                 return replay
 
             group_id = str(uuid4())
-            created_at = _now()
+            created_at = now_utc()
             conn.execute(
                 """
                 INSERT INTO groups(id, name, base_currency, version, created_at)
                 VALUES(?, ?, ?, ?, ?)
                 """,
-                (group_id, payload.name, payload.base_currency, 1, _iso(created_at)),
+                (group_id, payload.name, payload.base_currency, 1, iso(created_at)),
             )
 
             members = []
@@ -70,21 +79,21 @@ class LedgerService:
                     INSERT INTO group_members(group_id, member_id, display_name, active, joined_at, left_at)
                     VALUES(?, ?, ?, 1, ?, NULL)
                     """,
-                    (group_id, member.member_id, member.display_name, _iso(created_at)),
+                    (group_id, member.member_id, member.display_name, iso(created_at)),
                 )
                 conn.execute(
                     """
                     INSERT INTO membership_events(id, group_id, member_id, action, display_name, effective_at, version, created_at)
                     VALUES(?, ?, ?, 'add', ?, ?, ?, ?)
                     """,
-                    (str(uuid4()), group_id, member.member_id, member.display_name, _iso(created_at), 1, _iso(created_at)),
+                    (str(uuid4()), group_id, member.member_id, member.display_name, iso(created_at), 1, iso(created_at)),
                 )
                 members.append(
                     {
                         "member_id": member.member_id,
                         "display_name": member.display_name,
                         "active": True,
-                        "joined_at": _iso(created_at),
+                        "joined_at": iso(created_at),
                         "left_at": None,
                     }
                 )
@@ -141,7 +150,7 @@ class LedgerService:
             if payload.expected_version and group["version"] != payload.expected_version:
                 raise ConflictError(f"Expected group version {payload.expected_version}, found {group['version']}")
 
-            effective_at = _coerce_time(payload.effective_at)
+            effective_at = coerce_time(payload.effective_at)
             snapshot = {member["member_id"]: member for member in self._current_members(conn, group_id)}
 
             if payload.action == "add":
@@ -159,7 +168,7 @@ class LedgerService:
                         joined_at = excluded.joined_at,
                         left_at = NULL
                     """,
-                    (group_id, payload.member_id, payload.display_name, _iso(effective_at)),
+                    (group_id, payload.member_id, payload.display_name, iso(effective_at)),
                 )
             else:
                 if payload.member_id not in snapshot or not snapshot[payload.member_id]["active"]:
@@ -170,7 +179,7 @@ class LedgerService:
                     SET active = 0, left_at = ?
                     WHERE group_id = ? AND member_id = ?
                     """,
-                    (_iso(effective_at), group_id, payload.member_id),
+                    (iso(effective_at), group_id, payload.member_id),
                 )
 
             version = self._bump_group_version(conn, group_id)
@@ -185,9 +194,9 @@ class LedgerService:
                     payload.member_id,
                     payload.action,
                     payload.display_name,
-                    _iso(effective_at),
+                    iso(effective_at),
                     version,
-                    _iso(_now()),
+                    iso(now_utc()),
                 ),
             )
 
@@ -195,7 +204,7 @@ class LedgerService:
                 "group_id": group_id,
                 "member_id": payload.member_id,
                 "action": payload.action,
-                "effective_at": _iso(effective_at),
+                "effective_at": iso(effective_at),
                 "version": version,
                 "members": self._current_members(conn, group_id),
             }
@@ -228,13 +237,13 @@ class LedgerService:
                 raise ValidationError("base_currency and quote_currency must differ")
 
             rate_id = str(uuid4())
-            effective_at = _coerce_time(payload.effective_at)
+            effective_at = coerce_time(payload.effective_at)
             response = {
                 "id": rate_id,
                 "base_currency": payload.base_currency,
                 "quote_currency": payload.quote_currency,
-                "rate": _decimal_text(payload.rate),
-                "effective_at": _iso(effective_at),
+                "rate": decimal_text(payload.rate),
+                "effective_at": iso(effective_at),
                 "source": payload.source,
             }
             conn.execute(
@@ -246,10 +255,10 @@ class LedgerService:
                     rate_id,
                     payload.base_currency,
                     payload.quote_currency,
-                    _decimal_text(payload.rate),
-                    _iso(effective_at),
+                    decimal_text(payload.rate),
+                    iso(effective_at),
                     payload.source,
-                    _iso(_now()),
+                    iso(now_utc()),
                 ),
             )
             self._store_idempotent_response(conn, self._idempotency_scope("fx.create", metadata), request_data, response)
@@ -270,7 +279,7 @@ class LedgerService:
             if payload.expected_version and group["version"] != payload.expected_version:
                 raise ConflictError(f"Expected group version {payload.expected_version}, found {group['version']}")
 
-            occurred_at = _coerce_time(payload.occurred_at)
+            occurred_at = coerce_time(payload.occurred_at)
             member_state = self._members_as_of(conn, payload.group_id, occurred_at)
             active_member_ids = {member_id for member_id, state in member_state.items() if state["active"]}
             if payload.paid_by not in active_member_ids:
@@ -306,7 +315,7 @@ class LedgerService:
             version = self._bump_group_version(conn, payload.group_id)
             split_payload = {
                 "participant_ids": sorted(dict.fromkeys(participant_ids)),
-                "allocations": {member_id: _decimal_text(value) for member_id, value in allocations.items()},
+                "allocations": {member_id: decimal_text(value) for member_id, value in allocations.items()},
             }
             conn.execute(
                 """
@@ -317,15 +326,15 @@ class LedgerService:
                     expense_id,
                     payload.group_id,
                     payload.paid_by,
-                    _decimal_text(amount),
+                    decimal_text(amount),
                     payload.currency_code,
-                    _iso(occurred_at),
+                    iso(occurred_at),
                     payload.description,
                     payload.split_mode,
-                    _json(split_payload),
+                    json_dumps(split_payload),
                     payload.recurring_template_id,
                     version,
-                    _iso(_now()),
+                    iso(now_utc()),
                 ),
             )
 
@@ -335,7 +344,7 @@ class LedgerService:
                     INSERT INTO expense_allocations(expense_id, member_id, amount)
                     VALUES(?, ?, ?)
                     """,
-                    (expense_id, member_id, _decimal_text(allocation)),
+                    (expense_id, member_id, decimal_text(allocation)),
                 )
                 if member_id == payload.paid_by:
                     continue
@@ -350,10 +359,10 @@ class LedgerService:
                         expense_id,
                         member_id,
                         payload.paid_by,
-                        _decimal_text(allocation),
+                        decimal_text(allocation),
                         payload.currency_code,
-                        _iso(occurred_at),
-                        _iso(_now()),
+                        iso(occurred_at),
+                        iso(now_utc()),
                     ),
                 )
 
@@ -361,12 +370,12 @@ class LedgerService:
                 "id": expense_id,
                 "group_id": payload.group_id,
                 "paid_by": payload.paid_by,
-                "amount": _decimal_text(amount),
+                "amount": decimal_text(amount),
                 "currency_code": payload.currency_code,
-                "occurred_at": _iso(occurred_at),
+                "occurred_at": iso(occurred_at),
                 "description": payload.description,
                 "split_mode": payload.split_mode,
-                "allocations": {member_id: _decimal_text(value) for member_id, value in allocations.items()},
+                "allocations": {member_id: decimal_text(value) for member_id, value in allocations.items()},
                 "version": version,
                 "recurring_template_id": payload.recurring_template_id,
             }
@@ -407,7 +416,7 @@ class LedgerService:
             if payload.expected_version and group["version"] != payload.expected_version:
                 raise ConflictError(f"Expected group version {payload.expected_version}, found {group['version']}")
 
-            start_at = _coerce_time(payload.start_at)
+            start_at = coerce_time(payload.start_at)
             active_members = {member["member_id"] for member in self._current_members(conn, payload.group_id) if member["active"]}
             if payload.paid_by not in active_members:
                 raise ValidationError("paid_by must be an active member")
@@ -430,25 +439,25 @@ class LedgerService:
                     template_id,
                     payload.group_id,
                     payload.paid_by,
-                    _decimal_text(quantize_money(payload.amount, payload.currency_code)),
+                    decimal_text(quantize_money(payload.amount, payload.currency_code)),
                     payload.currency_code,
                     payload.description,
                     payload.split_mode,
-                    _json(split_payload),
+                    json_dumps(split_payload),
                     payload.cadence_unit,
                     payload.cadence_count,
-                    _iso(start_at),
-                    _iso(start_at),
-                    _iso(payload.ends_at) if payload.ends_at else None,
+                    iso(start_at),
+                    iso(start_at),
+                    iso(payload.ends_at) if payload.ends_at else None,
                     version,
-                    _iso(_now()),
+                    iso(now_utc()),
                 ),
             )
             response = {
                 "id": template_id,
                 "group_id": payload.group_id,
                 "paid_by": payload.paid_by,
-                "amount": _decimal_text(quantize_money(payload.amount, payload.currency_code)),
+                "amount": decimal_text(quantize_money(payload.amount, payload.currency_code)),
                 "currency_code": payload.currency_code,
                 "description": payload.description,
                 "split_mode": payload.split_mode,
@@ -456,9 +465,9 @@ class LedgerService:
                 "allocations": [entry.model_dump(mode="json") for entry in payload.allocations],
                 "cadence_unit": payload.cadence_unit,
                 "cadence_count": payload.cadence_count,
-                "start_at": _iso(start_at),
-                "ends_at": _iso(payload.ends_at) if payload.ends_at else None,
-                "next_run_at": _iso(start_at),
+                "start_at": iso(start_at),
+                "ends_at": iso(payload.ends_at) if payload.ends_at else None,
+                "next_run_at": iso(start_at),
                 "version": version,
             }
             self._record_audit(
@@ -506,9 +515,9 @@ class LedgerService:
             if row is None:
                 raise NotFoundError("Recurring template not found")
 
-        through = _coerce_time(payload.through)
-        next_run_at = _parse_time(row["next_run_at"])
-        ends_at = _parse_time(row["ends_at"]) if row["ends_at"] else None
+        through = coerce_time(payload.through)
+        next_run_at = parse_time(row["next_run_at"])
+        ends_at = parse_time(row["ends_at"]) if row["ends_at"] else None
         split_payload = json.loads(row["split_payload"])
         created: list[dict[str, Any]] = []
 
@@ -533,17 +542,20 @@ class LedgerService:
                     expense_payload,
                     RequestMetadata(
                         source="recurring",
-                        idempotency_key=f"{template_id}:{_iso(next_run_at)}",
+                        idempotency_key=f"{template_id}:{iso(next_run_at)}",
                     ),
                 )
             )
-            next_run_at = _advance_time(next_run_at, row["cadence_unit"], row["cadence_count"])
+            try:
+                next_run_at = advance_time(next_run_at, row["cadence_unit"], row["cadence_count"])
+            except ValueError as exc:
+                raise ValidationError(str(exc)) from exc
 
         response = {
             "template_id": template_id,
-            "through": _iso(through),
+            "through": iso(through),
             "created_expenses": created,
-            "next_run_at": _iso(next_run_at),
+            "next_run_at": iso(next_run_at),
         }
         with write_connection(self.db_path) as conn:
             conn.execute(
@@ -552,7 +564,7 @@ class LedgerService:
                 SET next_run_at = ?
                 WHERE id = ?
                 """,
-                (_iso(next_run_at), template_id),
+                (iso(next_run_at), template_id),
             )
             self._store_idempotent_response(
                 conn,
@@ -577,7 +589,7 @@ class LedgerService:
             if payload.expected_version and group["version"] != payload.expected_version:
                 raise ConflictError(f"Expected group version {payload.expected_version}, found {group['version']}")
 
-            occurred_at = _coerce_time(payload.occurred_at)
+            occurred_at = coerce_time(payload.occurred_at)
             active_members = {member_id for member_id, state in self._members_as_of(conn, payload.group_id, occurred_at).items() if state["active"]}
             if payload.paid_by not in active_members or payload.received_by not in active_members:
                 raise ValidationError("Both settlement participants must be active at the settlement time")
@@ -605,12 +617,12 @@ class LedgerService:
                     payload.group_id,
                     payload.paid_by,
                     payload.received_by,
-                    _decimal_text(amount),
+                    decimal_text(amount),
                     payload.currency_code,
-                    _iso(occurred_at),
+                    iso(occurred_at),
                     payload.description,
                     version,
-                    _iso(_now()),
+                    iso(now_utc()),
                 ),
             )
             conn.execute(
@@ -624,10 +636,10 @@ class LedgerService:
                     settlement_id,
                     payload.received_by,
                     payload.paid_by,
-                    _decimal_text(amount),
+                    decimal_text(amount),
                     payload.currency_code,
-                    _iso(occurred_at),
-                    _iso(_now()),
+                    iso(occurred_at),
+                    iso(now_utc()),
                 ),
             )
 
@@ -636,9 +648,9 @@ class LedgerService:
                 "group_id": payload.group_id,
                 "paid_by": payload.paid_by,
                 "received_by": payload.received_by,
-                "amount": _decimal_text(amount),
+                "amount": decimal_text(amount),
                 "currency_code": payload.currency_code,
-                "occurred_at": _iso(occurred_at),
+                "occurred_at": iso(occurred_at),
                 "description": payload.description,
                 "version": version,
             }
@@ -668,7 +680,7 @@ class LedgerService:
         valuation_policy: str,
         as_of: datetime | None,
     ) -> dict[str, Any]:
-        snapshot_time = _coerce_time(as_of)
+        snapshot_time = coerce_time(as_of)
         with read_connection(self.db_path) as conn:
             group = self._get_group_row(conn, group_id)
             target_currency = (settlement_currency or group["base_currency"]).upper()
@@ -679,13 +691,13 @@ class LedgerService:
                 WHERE group_id = ? AND occurred_at <= ?
                 ORDER BY occurred_at, created_at, id
                 """,
-                (group_id, _iso(snapshot_time)),
+                (group_id, iso(snapshot_time)),
             ).fetchall()
 
             member_states = self._members_as_of(conn, group_id, snapshot_time)
             balances = {member_id: Decimal("0") for member_id in member_states}
             for entry in entries:
-                rate_time = _parse_time(entry["occurred_at"]) if valuation_policy == "expense_time" else snapshot_time
+                rate_time = parse_time(entry["occurred_at"]) if valuation_policy == "expense_time" else snapshot_time
                 converted = self._convert_amount(
                     conn,
                     amount=Decimal(entry["amount"]),
@@ -702,7 +714,7 @@ class LedgerService:
                     "member_id": member_id,
                     "display_name": state["display_name"],
                     "active": state["active"],
-                    "net_amount": _decimal_text(quantize_money(amount, target_currency)),
+                    "net_amount": decimal_text(quantize_money(amount, target_currency)),
                 }
                 for member_id, amount in sorted(balances.items())
                 for state in [member_states[member_id]]
@@ -712,7 +724,7 @@ class LedgerService:
                 "group_version": group["version"],
                 "valuation_policy": valuation_policy,
                 "settlement_currency": target_currency,
-                "as_of": _iso(snapshot_time),
+                "as_of": iso(snapshot_time),
                 "balances": balance_items,
             }
 
@@ -821,9 +833,9 @@ class LedgerService:
                         operation.group_id,
                         operation.expected_group_version,
                         status,
-                        _json(result) if result is not None else None,
-                        _json(conflict) if conflict is not None else None,
-                        _iso(_now()),
+                        json_dumps(result) if result is not None else None,
+                        json_dumps(conflict) if conflict is not None else None,
+                        iso(now_utc()),
                     ),
                 )
             results.append(
@@ -915,7 +927,7 @@ class LedgerService:
             WHERE group_id = ? AND effective_at <= ?
             ORDER BY effective_at, created_at, id
             """,
-            (group_id, _iso(snapshot_time)),
+            (group_id, iso(snapshot_time)),
         ).fetchall()
 
         state: dict[str, dict[str, Any]] = {}
@@ -957,7 +969,7 @@ class LedgerService:
             ORDER BY effective_at DESC, created_at DESC, id DESC
             LIMIT 1
             """,
-            (source_currency, target_currency, _iso(as_of)),
+            (source_currency, target_currency, iso(as_of)),
         ).fetchone()
         if direct is not None:
             return quantize_money(amount * Decimal(direct["rate"]), target_currency)
@@ -970,7 +982,7 @@ class LedgerService:
             ORDER BY effective_at DESC, created_at DESC, id DESC
             LIMIT 1
             """,
-            (target_currency, source_currency, _iso(as_of)),
+            (target_currency, source_currency, iso(as_of)),
         ).fetchone()
         if inverse is not None:
             return quantize_money(amount / Decimal(inverse["rate"]), target_currency)
@@ -994,7 +1006,7 @@ class LedgerService:
             )
 
         raise ValidationError(
-            f"Missing FX rate for {source_currency}->{target_currency} at {_iso(as_of)}"
+            f"Missing FX rate for {source_currency}->{target_currency} at {iso(as_of)}"
         )
 
     def _get_group_row(self, conn: Any, group_id: str) -> Any:
@@ -1031,10 +1043,10 @@ class LedgerService:
                 event_type,
                 entity_type,
                 entity_id,
-                _json(payload),
+                json_dumps(payload),
                 group_version,
-                _iso(occurred_at),
-                _iso(_now()),
+                iso(occurred_at),
+                iso(now_utc()),
             ),
         )
 
@@ -1057,7 +1069,7 @@ class LedgerService:
         ).fetchone()
         if row is None:
             return None
-        if row["request_hash"] != _request_hash(request_data):
+        if row["request_hash"] != request_hash(request_data):
             raise ConflictError("Idempotency key has already been used with a different payload")
         return json.loads(row["response_json"])
 
@@ -1075,74 +1087,5 @@ class LedgerService:
             INSERT OR REPLACE INTO idempotency_records(scope, request_hash, response_json, created_at)
             VALUES(?, ?, ?, ?)
             """,
-            (scope, _request_hash(request_data), _json(response), _iso(_now())),
+            (scope, request_hash(request_data), json_dumps(response), iso(now_utc())),
         )
-
-
-def _now() -> datetime:
-    return datetime.now(UTC).replace(microsecond=0)
-
-
-def _coerce_time(value: datetime | None) -> datetime:
-    if value is None:
-        return _now()
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC).astimezone(UTC).replace(microsecond=0)
-    return value.astimezone(UTC).replace(microsecond=0)
-
-
-def _parse_time(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
-
-
-def _iso(value: datetime) -> str:
-    return _coerce_time(value).isoformat().replace("+00:00", "Z")
-
-
-def _decimal_text(value: Decimal) -> str:
-    normalized = value.normalize()
-    return format(normalized, "f") if normalized % 1 else format(value, "f")
-
-
-def _json(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=_json_default)
-
-
-def _json_default(value: Any) -> str:
-    if isinstance(value, Decimal):
-        return _decimal_text(value)
-    if isinstance(value, datetime):
-        return _iso(value)
-    raise TypeError(f"Unsupported type for JSON serialization: {type(value)!r}")
-
-
-def _request_hash(value: dict[str, Any]) -> str:
-    return hashlib.sha256(_json(value).encode("utf-8")).hexdigest()
-
-
-def _advance_time(value: datetime, cadence_unit: str, cadence_count: int) -> datetime:
-    if cadence_unit == "day":
-        return value + timedelta(days=cadence_count)
-    if cadence_unit == "week":
-        return value + timedelta(weeks=cadence_count)
-    if cadence_unit == "month":
-        year = value.year
-        month = value.month + cadence_count
-        while month > 12:
-            year += 1
-            month -= 12
-        while month < 1:
-            year -= 1
-            month += 12
-        day = min(value.day, _days_in_month(year, month))
-        return value.replace(year=year, month=month, day=day)
-    raise ValidationError(f"Unsupported cadence unit: {cadence_unit}")
-
-
-def _days_in_month(year: int, month: int) -> int:
-    if month == 12:
-        next_month = datetime(year + 1, 1, 1, tzinfo=UTC)
-    else:
-        next_month = datetime(year, month + 1, 1, tzinfo=UTC)
-    this_month = datetime(year, month, 1, tzinfo=UTC)
-    return (next_month - this_month).days

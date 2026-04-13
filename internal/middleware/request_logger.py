@@ -1,4 +1,4 @@
-"""Structured request logging middleware for the Expense Splitter API.
+"""Structured request logging middleware for the SettleUp API.
 
 Captures request/response metadata as structured JSON, generates
 unique request IDs, measures timing, and redacts sensitive fields.

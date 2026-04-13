@@ -1,4 +1,4 @@
-"""Export service for the Expense Splitter API.
+"""Export service for the SettleUp API.
 
 Handles CSV and JSON export generation with filtering, date ranges,
 summary rows, and export job tracking.

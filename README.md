@@ -1,200 +1,191 @@
-# Expense Splitter API
+# SettleUp API
 
-A production-ready FastAPI service for managing shared expenses across groups with multi-currency support, offline sync, and intelligent debt simplification.
+SettleUp is a **backend-first shared-expense ledger service** built with FastAPI and SQLite.
 
-## Architecture
+It is not positioned as a production deployment template yet. It is positioned as a **production-inspired backend project** with non-trivial financial logic and solid engineering scope.
 
-### Storage Layer (`internal/storage/`)
-- **sqlite.py**: Transactional SQLite database with:
-  - Foreign key constraints
-  - Write-ahead logging (WAL) for concurrency
-  - Schema initialization with all required tables
-  - Context managers for read/write transactions
+## Why This Project Is Different
 
-### Models (`internal/models/`)
-- **group.py**: Group and membership management
-- **expense.py**: Expense creation with allocation support
-- **fx.py**: Foreign exchange rate records
-- **recurring.py**: Recurring expense templates and materialization
-- **settlement.py**: Debt settlement records
-- **sync.py**: Offline sync operation definitions
+Compared with basic CRUD expense trackers, SettleUp includes:
 
-### Service Layer (`internal/service/`)
-- **ledger_service.py**: Core business logic (1149 lines)
-  - Idempotent write handling via request hashing
-  - Group and membership management with versioning
-  - Expense creation with multiple split modes
-  - Recurring expense generation and materialization
-  - Multi-currency conversion with FX lookups
-  - Settlement recording
-  - Balance computation with time-travel queries
-  - Audit trail recording
-  - Offline sync with conflict detection
+- Multi-member group ledgers with versioned membership events
+- Equal/fixed/percentage split modes with currency-aware rounding
+- Multi-currency balances with time-aware FX conversion
+- Recurring expense templates and materialization
+- Debt settlement planning (optimal for small groups, greedy fallback for larger groups)
+- Audit trail events and idempotent write handling
+- Offline sync operation replay/conflict handling
+- Budget tracking, notification preferences, and export flows
+- Request logging and rate limiting middleware
 
-- **split_service.py**: Financial computation
-  - Equal split allocation
-  - Fixed amount allocation
-  - Percentage allocation
-  - Debt simplification:
-    - Optimal solver for ≤10 members (depth-first search)
-    - Greedy fallback heuristic for larger groups
-  - Currency-aware quantization
+## Tech Stack
 
-### Handlers (`internal/handler/`)
-- **group_handler.py**: Group endpoints
-  - `POST /groups` - Create group
-  - `GET /groups/{group_id}` - Get group details
-  - `POST /groups/{group_id}/members` - Add/remove members
+- Python 3.12
+- FastAPI
+- SQLite (WAL mode, foreign keys enabled)
+- Pydantic v2
+- Pytest (test suite)
+- GitHub Actions (CI)
+- Docker
 
-- **expense_handler.py**: All other endpoints
-  - `POST /expenses` - Create expense
-  - `POST /fx-rates` - Record FX rate
-  - `POST /recurring-templates` - Create template
-  - `POST /recurring-templates/{id}/materialize` - Generate instances
-  - `POST /settlements` - Record settlement
-  - `GET /groups/{group_id}/balances` - Compute balances
-  - `GET /groups/{group_id}/settlement-plan` - Get optimal transfers
-  - `GET /groups/{group_id}/audit` - Audit history
-  - `POST /sync` - Offline sync
+## Project Structure
 
-## Key Features
+- `internal/handler/`: HTTP routes
+- `internal/service/`: business logic
+- `internal/models/`: request/response schemas
+- `internal/storage/`: DB schema and connection helpers
+- `internal/middleware/`: auth, request logging, rate limiting
+- `internal/utils/`: helper modules
+- `tests/`: pytest suite
+- `scripts/`: utility scripts (demo seed + token generation)
 
-### 1. Transactional Consistency
-- All writes wrapped in IMMEDIATE transactions
-- Idempotent operations via request hash tracking
-- Version-based optimistic locking on groups
-
-### 2. Expense Allocation
-Three split modes:
-- **Equal**: Divide equally, distribute rounding to first N members
-- **Fixed**: Each member gets exact amount
-- **Percentage**: Each member's share as percentage of total
-
-### 3. Multi-Currency Support
-- Per-group base currency
-- FX conversions with effective dating
-- Direct rate lookup, inverse calculation, or pivot currency conversion
-- Time-based valuation policy for historical accuracy
-
-### 4. Recurring Expenses
-- Daily/weekly/monthly cadence
-- Automatic generation up to specified date
-- Idempotent materialization with per-occurrence deduplication
-- Template-linked to individual expense records
-
-### 5. Debt Simplification
-Optimal algorithm for small groups (≤10 members):
-- Depth-first search explores all pairing combinations
-- Minimizes transfer count
-
-Greedy fallback for larger groups:
-- Sort by amount (descending)
-- Pair largest debtor with largest creditor
-- O(n²) but practical performance
-
-### 6. Audit & Compliance
-- Complete event log with timestamps
-- Group version tracking per event
-- JSON payload capture
-- Time-travel member queries for historical accuracy
-
-### 7. Offline Sync
-- Device-scoped operation tracking
-- Conflict detection via version mismatch
-- Replay prevention via device + operation ID
-- Supports: membership changes, expenses, settlements, recurring
-
-## API Usage
-
-### Authentication
-All endpoints require `Authorization: Bearer test-token` header (configurable in middleware).
-
-### Example Flow
+## Local Setup
 
 ```bash
-# Create a group
+make setup
+source .venv/bin/activate
+make run
+```
+
+Service starts on `http://localhost:8080`.
+
+Health check:
+
+```bash
+curl http://localhost:8080/health
+```
+
+## Authentication
+
+All protected endpoints require a bearer token.
+
+You can use either static service tokens or signed auth tokens.
+
+Static service tokens:
+
+```bash
+export SETTLEUP_API_TOKENS="local-dev-token,another-token"
+```
+
+Signed tokens (recommended for realistic backend behavior):
+
+```bash
+export SETTLEUP_AUTH_SECRET="replace-with-long-random-secret"
+python scripts/generate_auth_token.py --sub alice --role admin
+# or
+make token
+```
+
+If no static token list and no signing secret are set, the development fallback token is:
+
+```text
+dev-token-change-me
+```
+
+Example request header:
+
+```text
+Authorization: Bearer local-dev-token
+```
+
+## Quick API Flow
+
+```bash
+# 1) Create group
 curl -X POST http://localhost:8080/groups \
-  -H "Authorization: Bearer test-token" \
+  -H "Authorization: Bearer local-dev-token" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Trip to Paris",
     "base_currency": "EUR",
     "members": [
       {"member_id": "alice", "display_name": "Alice"},
-      {"member_id": "bob", "display_name": "Bob"}
+      {"member_id": "bob", "display_name": "Bob"},
+      {"member_id": "cara", "display_name": "Cara"}
     ]
   }'
 
-# Add an expense
+# 2) Add expense
 curl -X POST http://localhost:8080/expenses \
-  -H "Authorization: Bearer test-token" \
+  -H "Authorization: Bearer local-dev-token" \
   -H "Content-Type: application/json" \
   -d '{
-    "group_id": "fa2e6d8b-5415-4d02-a953-d862e28d43ea",
+    "group_id": "<group-id>",
     "paid_by": "alice",
     "amount": "90",
     "currency_code": "EUR",
     "description": "Hotel",
     "split_mode": "equal",
-    "participant_ids": ["alice", "bob"]
+    "participant_ids": ["alice", "bob", "cara"]
   }'
 
-# Get settlement plan
-curl http://localhost:8080/groups/fa2e6d8b-5415-4d02-a953-d862e28d43ea/settlement-plan \
-  -H "Authorization: Bearer test-token"
+# 3) Get settlement plan
+curl "http://localhost:8080/groups/<group-id>/settlement-plan" \
+  -H "Authorization: Bearer local-dev-token"
 ```
-
-## Running the Service
-
-```bash
-# Setup
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# Run
-python main.py
-# Starts on http://localhost:8080
-
-# Health check
-curl http://localhost:8080/health
-```
-
-## Database
-
-- Location: `./expense_splitter.db` (or `$EXPENSE_SPLITTER_DB_PATH`)
-- Auto-initialized on first service start
-- Contains 12 tables with full referential integrity
-- Indices on frequently-queried columns
-
-## Error Handling
-
-Service errors return appropriate HTTP status codes:
-- `400 Bad Request` - Validation errors
-- `404 Not Found` - Resource not found
-- `409 Conflict` - Version mismatch or idempotency violation
-- `422 Unprocessable Entity` - Semantic validation failure
-
-All errors include a `detail` field explaining the issue.
-
-## Implementation Notes
-
-1. **Decimal precision**: Uses `Decimal` type throughout for financial calculations
-2. **Time handling**: All times in UTC with timezone normalization
-3. **Currency scaling**: Handles 0, 2, and 3 decimal currencies (JPY, BHD, etc.)
-4. **Empty balances**: Not returned in balance queries
-5. **Member state**: Tracks joined_at/left_at with effective_at versioning
-6. **Settlement as ledger entry**: Settlements create reverse debit entries
 
 ## Testing
 
-The implementation has been tested with:
-- ✓ Group creation and management
-- ✓ Equal, fixed, and percentage splits
-- ✓ FX rate conversion
-- ✓ Recurring expense generation (multi-occurrence)
-- ✓ Settlement recording and balance updates
-- ✓ Optimal and greedy settlement planning
-- ✓ Audit history tracking
-- ✓ Membership changes
-- ✓ Offline sync with conflict detection
+Run tests locally:
+
+```bash
+make test
+```
+
+The suite currently covers:
+
+- Group creation
+- Equal/fixed/percentage splits
+- Rounding edge cases (zero and 3-decimal currencies)
+- FX conversion in balance computation
+- Settlement-plan correctness regression
+- Recurring materialization
+- Budget summary calculations
+- Auth and rate-limit behavior
+
+CI runs this suite on every push and pull request via GitHub Actions.
+
+## Demo Seed Data
+
+Generate a realistic demo group with expenses, FX rates, recurring entries, budgets, and a sample settlement:
+
+```bash
+make seed
+```
+
+Or pick a DB path:
+
+```bash
+python scripts/seed_demo.py --db-path ./data/demo.db
+```
+
+The seed script prints resulting balances and settlement transfers for quick verification.
+
+## Docker
+
+Build and run:
+
+```bash
+docker build -t settleup-api .
+docker run --rm -p 8080:8080 \
+  -e SETTLEUP_API_TOKENS=local-dev-token \
+  -v $(pwd)/data:/data \
+  settleup-api
+```
+
+The DB path in-container defaults to `/data/settleup.db`.
+
+## Notes on Scope
+
+- This repository is backend-only by design.
+- If you need a product-facing demo, add a lightweight UI for group creation, expense entry, and settlement viewing.
+- Current implementation is strongest as a backend/platform interview project.
+
+## Deployment Status
+
+- Local/Docker/CI flows are set up.
+- Hosted deployment (Render/Railway) is the next step.
+
+## Resume-Friendly Description
+
+"Built and tested a containerized FastAPI shared-expense ledger backend supporting multi-currency balance computation, recurring billing, audit logging, idempotent writes, budget tracking, and settlement planning."

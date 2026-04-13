@@ -1,4 +1,4 @@
-"""Cryptographic and security utilities for the Expense Splitter API.
+"""Cryptographic and security utilities for the SettleUp API.
 
 Provides token generation, API key hashing, and idempotency key
 generation — all using standard library HMAC/SHA-256.

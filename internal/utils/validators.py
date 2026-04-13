@@ -1,4 +1,4 @@
-"""Validation utilities for the Expense Splitter API.
+"""Validation utilities for the SettleUp API.
 
 Provides reusable validators for currency codes, email addresses,
 date ranges, monetary amounts, and string sanitization.

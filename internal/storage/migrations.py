@@ -1,4 +1,4 @@
-"""Schema migration framework for the Expense Splitter API.
+"""Schema migration framework for the SettleUp API.
 
 Provides a lightweight migration system that tracks schema versions,
 supports forward migrations, and registers built-in migrations for

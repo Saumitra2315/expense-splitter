@@ -1,4 +1,4 @@
-"""Export models for the Expense Splitter API.
+"""Export models for the SettleUp API.
 
 Defines Pydantic schemas for export requests, jobs, and result formats.
 """

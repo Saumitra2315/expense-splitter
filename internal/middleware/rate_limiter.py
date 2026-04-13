@@ -1,4 +1,4 @@
-"""Rate limiting middleware for the Expense Splitter API.
+"""Rate limiting middleware for the SettleUp API.
 
 Implements a token-bucket rate limiter with per-IP and per-token
 limits, sliding window tracking, and standard rate-limit headers.

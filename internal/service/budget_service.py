@@ -1,4 +1,4 @@
-"""Budget service for the Expense Splitter API.
+"""Budget service for the SettleUp API.
 
 Manages budget creation, spending tracking, threshold alerts,
 auto-categorization of expenses, and period-based rollover logic.

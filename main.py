@@ -11,9 +11,9 @@ from internal.middleware.request_logger import RequestLoggerMiddleware
 from internal.service.ledger_service import ServiceError
 
 app = FastAPI(
-    title="Expense Splitter",
-    description="Production-ready API for managing shared expenses across groups",
-    version="2.0.0",
+    title="SettleUp API",
+    description="Production-inspired FastAPI ledger service for shared expenses",
+    version="2.1.0",
 )
 
 

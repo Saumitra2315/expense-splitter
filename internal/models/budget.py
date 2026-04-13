@@ -1,4 +1,4 @@
-"""Budget models for the Expense Splitter API.
+"""Budget models for the SettleUp API.
 
 Defines Pydantic schemas for budget management, category rules,
 and budget alert tracking.

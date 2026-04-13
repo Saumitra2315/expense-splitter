@@ -119,48 +119,62 @@ def _percentage_allocations(
 
 
 def _optimal_transfers(minor_balances: dict[str, int], multiplier: int) -> list[dict[str, str]]:
-    members = [member_id for member_id, amount in minor_balances.items() if amount != 0]
-    amounts = [minor_balances[member_id] for member_id in members]
+    debtors = sorted(
+        [(member_id, -amount) for member_id, amount in minor_balances.items() if amount < 0],
+        key=lambda item: (-item[1], item[0]),
+    )
+    creditors = sorted(
+        [(member_id, amount) for member_id, amount in minor_balances.items() if amount > 0],
+        key=lambda item: (-item[1], item[0]),
+    )
+    if not debtors or not creditors:
+        return []
 
-    def dfs(start: int) -> tuple[int, list[tuple[str, str, int]]]:
-        while start < len(amounts) and amounts[start] == 0:
-            start += 1
-        if start == len(amounts):
-            return 0, []
+    debtor_amounts = [amount for _, amount in debtors]
+    creditor_amounts = [amount for _, amount in creditors]
+    best_plan: list[tuple[str, str, int]] | None = None
 
-        best_count = len(amounts)
-        best_plan: list[tuple[str, str, int]] = []
-        seen: set[int] = set()
+    def _lower_bound(start_debtor: int) -> int:
+        remaining_debtors = sum(1 for amount in debtor_amounts[start_debtor:] if amount > 0)
+        remaining_creditors = sum(1 for amount in creditor_amounts if amount > 0)
+        return max(remaining_debtors, remaining_creditors)
 
-        for index in range(start + 1, len(amounts)):
-            current = amounts[start]
-            candidate = amounts[index]
-            if current * candidate >= 0 or candidate in seen:
+    def dfs(start_debtor: int, current_plan: list[tuple[str, str, int]]) -> None:
+        nonlocal best_plan
+
+        while start_debtor < len(debtor_amounts) and debtor_amounts[start_debtor] == 0:
+            start_debtor += 1
+        if start_debtor == len(debtor_amounts):
+            if best_plan is None or len(current_plan) < len(best_plan):
+                best_plan = list(current_plan)
+            return
+
+        if best_plan is not None and len(current_plan) + _lower_bound(start_debtor) >= len(best_plan):
+            return
+
+        debt_remaining = debtor_amounts[start_debtor]
+        seen_credit_amounts: set[int] = set()
+
+        for creditor_index, credit_amount in enumerate(creditor_amounts):
+            if credit_amount == 0 or credit_amount in seen_credit_amounts:
                 continue
-            seen.add(candidate)
+            seen_credit_amounts.add(credit_amount)
 
-            transfer_minor = min(abs(current), abs(candidate))
-            if current < 0:
-                transfer = (members[start], members[index], transfer_minor)
-            else:
-                transfer = (members[index], members[start], transfer_minor)
+            transfer_minor = min(debt_remaining, credit_amount)
+            debtor_amounts[start_debtor] -= transfer_minor
+            creditor_amounts[creditor_index] -= transfer_minor
+            current_plan.append((debtors[start_debtor][0], creditors[creditor_index][0], transfer_minor))
 
-            original = amounts[index]
-            amounts[index] = original + current
-            count, plan = dfs(start + 1)
-            amounts[index] = original
+            next_debtor = start_debtor + 1 if debtor_amounts[start_debtor] == 0 else start_debtor
+            dfs(next_debtor, current_plan)
 
-            if 1 + count < best_count:
-                best_count = 1 + count
-                best_plan = [transfer, *plan]
+            current_plan.pop()
+            debtor_amounts[start_debtor] += transfer_minor
+            creditor_amounts[creditor_index] += transfer_minor
 
-            if original + current == 0:
-                break
-
-        return best_count, best_plan
-
-    _, plan = dfs(0)
-    return [_transfer_dict(debtor, creditor, amount, multiplier) for debtor, creditor, amount in plan]
+    dfs(0, [])
+    final_plan = best_plan or []
+    return [_transfer_dict(debtor, creditor, amount, multiplier) for debtor, creditor, amount in final_plan]
 
 
 def _greedy_transfers(minor_balances: dict[str, int], multiplier: int) -> list[dict[str, str]]:

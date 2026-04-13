@@ -1,4 +1,4 @@
-"""Formatting utilities for the Expense Splitter API.
+"""Formatting utilities for the SettleUp API.
 
 Handles money formatting, date/time display, and structured output
 generation for exports and API responses.

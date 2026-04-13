@@ -1,4 +1,4 @@
-"""Budget HTTP handlers for the Expense Splitter API.
+"""Budget HTTP handlers for the SettleUp API.
 
 Exposes endpoints for budget management, spending tracking,
 and category rule configuration.

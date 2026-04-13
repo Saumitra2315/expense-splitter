@@ -1,4 +1,4 @@
-"""Notification HTTP handlers for the Expense Splitter API.
+"""Notification HTTP handlers for the SettleUp API.
 
 Exposes endpoints for managing notification preferences, listing events,
 marking events as read, and computing notification digests.

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Iterator
 
 
-DEFAULT_DB_PATH = Path(__file__).resolve().parents[2] / "expense_splitter.db"
+DEFAULT_DB_PATH = Path(__file__).resolve().parents[2] / "settleup.db"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS groups (
@@ -268,7 +268,7 @@ CREATE INDEX IF NOT EXISTS idx_export_jobs_group
 
 
 def resolve_db_path() -> Path:
-    configured = os.getenv("EXPENSE_SPLITTER_DB_PATH")
+    configured = os.getenv("SETTLEUP_DB_PATH") or os.getenv("EXPENSE_SPLITTER_DB_PATH")
     if configured:
         return Path(configured)
     return DEFAULT_DB_PATH

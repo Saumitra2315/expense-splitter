@@ -1,4 +1,4 @@
-"""Notification service for the Expense Splitter API.
+"""Notification service for the SettleUp API.
 
 Manages notification preferences, event dispatch, digest computation,
 and threshold-based alerts — all persisted in SQLite.

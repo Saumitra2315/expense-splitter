@@ -1,4 +1,4 @@
-"""Export HTTP handlers for the Expense Splitter API.
+"""Export HTTP handlers for the SettleUp API.
 
 Exposes endpoints for creating and retrieving data exports.
 """

@@ -1,4 +1,4 @@
-"""Notification models for the Expense Splitter API.
+"""Notification models for the SettleUp API.
 
 Defines Pydantic schemas for notification preferences, events,
 and digest configuration.

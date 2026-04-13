@@ -1,4 +1,4 @@
-"""Date and time helper utilities for the Expense Splitter API.
+"""Date and time helper utilities for the SettleUp API.
 
 Provides date range iteration, period boundary calculations,
 business day logic, and timezone-aware date coercion.
